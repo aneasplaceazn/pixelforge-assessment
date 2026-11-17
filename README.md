@@ -1,6 +1,20 @@
 # PixelForge image studio
 
-A Laravel 13 / Vue 3 / Inertia 3 application for the [PromptEdit assessment](https://pixelforge.promptedit.dev/assessment). It uses the documented [PixelForge API](https://pixelforge.promptedit.dev/docs), PostgreSQL, Redis, and Sail. No real payments are taken.
+A Laravel 13 / Vue 3 / Inertia 3 application for the [PromptEdit assessment](https://pixelforge.promptedit.dev/assessment). Users can register, request images with prompts, sizes, quality levels and optional references, review maximum prices, and follow their private generation history through completion. Exact usage-based charges include a 25% markup; failed generations are free. No real payments are taken.
+
+**Live application:** [PixelForge image studio](https://pixelforge-assessment-production-xt3tlo.laravel.cloud).
+
+The Vue/Inertia interface uses compiled Tailwind assets. Laravel owns authentication, provider requests, quotes, webhook verification and billing. PostgreSQL stores users, sessions, generations and the webhook inbox. Redis-compatible Valkey supplies production caching, distributed locks and queues; local development uses Redis and Laravel Sail. The documented [PixelForge API](https://pixelforge.promptedit.dev/docs) is simulated: it returns abstract placeholder PNGs captioned with the prompt, rather than actual AI artwork.
+
+## Reviewer walkthrough
+
+1. Open the live application and select **Log in**. Use the reviewer credentials supplied privately with the submission, or register your own account. Credentials are never published in this repository.
+2. The **Image studio** shows the signed-in account's sample generations under **Your generations**. Another account's history is intentionally inaccessible.
+3. Enter a prompt, choose size and quality, and optionally add reference URLs. Select **Get price estimate** to see the maximum estimated user price, including the 25% markup.
+4. Select **Generate image** only after reviewing that estimate. The history updates automatically through queued, processing, succeeded or failed states.
+5. Completed cards show the image, estimated price and exact final charge. Reloading the page preserves history. Failed generations show zero charge; unresolved requests are not mislabeled as free failures.
+
+Provider image URLs expire 24 hours after completion. History and accounting remain available after the image expires; this application does not archive the PNGs. Prepare reviewer samples close to review time. Prompt reuse creates a new generation and requires a fresh estimate.
 
 ## Local setup
 
@@ -45,7 +59,7 @@ Deletion removes the user, database sessions and password-reset tokens. Never-su
 
 Accepted or uncertain in-flight work retains its original parameters until the outcome is reconciled, so retries cannot change an idempotent request. It may finish and incur a charge. Terminal settlement then erases its content. Processed webhook payloads are cleared; event IDs and processing metadata remain for deduplication. Pending/failed inbox payloads remain for recovery/investigation, with terminal deleted-account payloads redacted. Provider-held copies and infrastructure backups are outside this application's deletion operation. Configure backup retention for the selected host.
 
-Monitor paused requests, including deleted accounts, and resolve them promptly. `pixelforge:resume GENERATION_UUID` resumes the same request with its existing cooldown and key; it may send a provider request. Investigate before invoking it. It must not be used to bypass the user's restriction on new live generation requests during this review.
+Monitor paused requests, including deleted accounts, and resolve them promptly. `pixelforge:resume GENERATION_UUID` resumes the same request with its existing cooldown and key; it may send a provider request. Investigate before invoking it and obtain authorization for any provider usage it may incur.
 
 ## Verification
 
@@ -66,15 +80,50 @@ Automated tests never use provider credentials; outgoing HTTP is blocked unless 
 
 The usage command compares exact costs by **UTC completion day**, exits nonzero on discrepancy, and never rewrites accounting records. Use a dedicated provider key; preexisting generations created outside this app will appear as differences. The command is an operational reconciliation check, not the optional admin-report feature.
 
-## Deployment preparation — approval required
+## Laravel Cloud deployment
 
-No deployment or public repository has been created. After approval, select a host with PHP 8.5 + BCMath + PostgreSQL support, Redis, a durable queue worker, and a scheduler. Point the web server at `public/`; do not serve the project root. Run a production asset build, install Composer dependencies with `--no-dev --optimize-autoloader`, apply reviewed migrations, cache configuration/routes/views, and restart workers after release. Do not enable SSR unless an SSR build and process are also configured; client rendering is sufficient.
+The `production` environment is deployed on Laravel Cloud Starter in Ohio (`us-east-2`). It uses one Flex 512 MiB app instance, PHP 8.5 with BCMath, Node 24 during builds, PostgreSQL 18 at a fixed 0.25 CU, and private Valkey Flex 250 MB. PostgreSQL has one day of point-in-time recovery retention. No dedicated worker server, SSR process, object storage, or email service is required. Automatic deployments, compute scaling, cache upgrades and hibernation are disabled for this assessment configuration.
 
-Set a persistent `APP_KEY`, `APP_ENV=production`, `APP_DEBUG=false`, an HTTPS `APP_URL`, secure session cookies, database/Redis credentials, and a distinct provider key/signing secret. Configure trusted proxies for the chosen host rather than blindly trusting arbitrary forwarding headers. Configure mail transport if retaining password resets. Never rotate `APP_KEY` casually: encrypted cookies depend on it.
+Cloud's native build command is:
 
-Run `php artisan queue:work --sleep=1 --tries=3 --timeout=30` under a process supervisor and `php artisan schedule:run` every minute. Keep the queue reservation timeout above the worker timeout (the default 90 seconds exceeds 30). Use shared Redis across app/worker instances. Back up PostgreSQL, retain a previous release, and prefer a forward fix over destructive schema rollback. Monitor failed jobs, pending/failed inbox events and paused generations. `pixelforge:webhooks` lists up to 50 quarantined events and exits 1 when any exist; inspect and resolve these before using `pixelforge:webhooks EVENT_ID --retry`. It never prints payloads. Monitor pending-event age as well as failures: the scheduler scans at most 100 inbox events and 40 due generations per minute. Polling provides independent recovery.
+```sh
+composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+npm ci --include=dev
+npm run build
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+rm -rf node_modules
+```
 
-Before release acceptance: test HTTPS registration/login, signed provider ping, success/failure/duplicate/slow workflows, queue restart recovery, image display, and `pixelforge:usage`. Record actual hosted results separately from local tests. Leave a few completed images for the assessment reviewers only after deployment is approved.
+The deploy command is `php artisan migrate --force --no-interaction`. Cloud manages release and worker replacement; do not add cache-clearing or worker-restart commands to deployment. Documentation-only commits do not require redeploying the unchanged application.
+
+One colocated background process runs `php artisan queue:work redis --queue=default --tries=3 --backoff=30 --sleep=1 --timeout=30 --quiet`. `REDIS_QUEUE_RETRY_AFTER=90` exceeds the worker timeout. Cloud's scheduler runs Laravel's schedule every minute, including `pixelforge:reconcile` with overlapping runs prevented. Shared Valkey uses `noeviction` to avoid silently dropping queued work; monitor capacity and failed jobs.
+
+Cloud injects database and cache connections. Production settings include a persistent `APP_KEY`, `APP_ENV=production`, `APP_DEBUG=false`, the HTTPS `APP_URL`, database sessions with Secure/HttpOnly/SameSite=Lax cookies, `QUEUE_CONNECTION=redis`, `CACHE_STORE=redis`, `REDIS_CLIENT=phpredis`, and `INERTIA_SSR_ENABLED=false`. Dedicated provider credentials stay in Cloud environment settings, never frontend variables. The production key's webhook destination is the live application's `/webhooks/pixelforge` endpoint. Never rotate `APP_KEY` casually: encrypted cookies depend on it.
+
+**Production password-reset email delivery is unavailable.** SMTP and email providers are intentionally not configured. `MAIL_MAILER=log`, `MAIL_LOG_CHANNEL=stderr` and `LOG_LEVEL=info` suppress the log transport's debug-level email bodies. Password-reset routes remain available, but users will not receive reset emails. Registration and login do not require email verification. Local Mailpit remains available for development.
+
+Monitor failed jobs, pending/failed inbox events and paused generations. `pixelforge:webhooks` lists up to 50 quarantined events and exits 1 when any exist; investigate before using `pixelforge:webhooks EVENT_ID --retry`. It never prints payloads. The scheduler scans at most 100 inbox events and 40 due generations per minute. Restore procedures and sustained-load capacity have not been exercised on this assessment deployment. Compute can pause at the configured spending threshold, interrupting scheduled work until service resumes; storage charges can continue. Preserve records and reconcile pending work before an approved shutdown.
+
+## Production verification — 2026-11-17 UTC
+
+The deployed application source is `2a7e9219d0d811c43efb12ee1fa971a2bedb2dfc`. GitHub CI on that source passed 148 tests and 802 assertions, plus code style, static analysis, frontend checks and build. Those automated tests simulate the provider; the following checks used the hosted application and dedicated production provider key:
+
+- Native production build and all nine migrations succeeded. HTTPS, health checks, registration/login/logout, database sessions, cache operations, lock exclusion/release, secure cookies, compiled assets and mobile layout passed.
+- The actual Cloud scheduler recovered an undispatched inbox ping, and the Redis worker processed it once. A provider-originated dashboard ping verified the configured webhook URL and signing secret. Invalid, missing, expired and tampered signatures were rejected.
+- One approved `[succeed][duplicate]` generation progressed through queued, processing and succeeded. Its PNG decoded at 1024×1024 before and after reload; history and charges persisted. Logs recorded four successful webhook deliveries, while two unique lifecycle events were each processed once. Access logs omit event IDs, so individual HTTP deliveries cannot be mapped conclusively to each event.
+
+| Real generation result    |   Exact USD |
+| ------------------------- | ----------: |
+| Maximum provider estimate | 0.017480000 |
+| Actual provider cost      | 0.016812500 |
+| Exactly 25% markup        | 0.004203125 |
+| Final user charge         | 0.021015625 |
+
+Actual usage was 5 text, 0 reference-image, 280 output and 447 reasoning tokens. Generation-specific rates, the database and the provider's usage report matched exactly. `php artisan pixelforge:usage 2026-11-17 2026-11-17` exited 0 with MATCH. After duplicate deliveries there was still one billing row, unchanged charges, no failed jobs and no pending webhook events. Inspected browser responses and bounded production logs contained no known credentials or critical errors.
+
+This verifies one production success/duplicate workflow, not all possible failures. Production failure/slow/overload generation tests, sustained load and backup restoration remain unverified; deterministic tests and earlier local provider tests are recorded separately. Additional reviewer samples require separate approval and should be generated near submission because image URLs expire.
 
 Optional balances, fake purchases, and the operator report are intentionally excluded. See [AUDIT.md](AUDIT.md) for measured acceptance evidence and remaining limitations.
 
