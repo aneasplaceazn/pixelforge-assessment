@@ -67,8 +67,11 @@ const passwordInput = useTemplateRef('passwordInput');
                                 their content is retained only until the result
                                 is reconciled. Anonymous financial records
                                 remain for billing reconciliation. This does not
-                                delete copies held by the image provider. Enter
-                                your password to confirm. This cannot be undone.
+                                restore access to unused simulated credits;
+                                reservations and final charges remain anonymous.
+                                Account deletion does not delete copies held by
+                                the image provider. Enter your password to
+                                confirm. This cannot be undone.
                             </DialogDescription>
                         </DialogHeader>
 

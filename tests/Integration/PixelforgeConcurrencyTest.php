@@ -4,6 +4,7 @@ use App\Actions\ProcessWebhook;
 use App\Jobs\ProcessWebhookEvent;
 use App\Models\Generation;
 use App\Models\WebhookEvent;
+use App\Services\Credits;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -11,20 +12,6 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 uses(TestCase::class, DatabaseMigrations::class);
-
-function assertBlockedPostgresWorkers(string $name, int $expected): void
-{
-    $deadline = microtime(true) + 10;
-    do {
-        DB::select('select pg_stat_clear_snapshot()');
-        $blocked = DB::selectOne("select count(*) as count from pg_stat_activity where application_name = ? and wait_event_type = 'Lock'", [$name])->count;
-        if ((int) $blocked === $expected) {
-            break;
-        }
-        usleep(10000);
-    } while (microtime(true) < $deadline);
-    expect((int) $blocked)->toBe($expected, 'All workers must overlap and wait on real PostgreSQL locks.');
-}
 
 test('parallel delivery of duplicate and distinct success events settles once in PostgreSQL', function () {
     $generation = Generation::factory()->create();
@@ -128,7 +115,7 @@ test('a real Redis worker consumes a deduplicated durable inbox job', function (
 });
 
 test('upgrading the original schema preserves records and active cooldown deadlines', function () {
-    $this->artisan('migrate:rollback', ['--step' => 3, '--force' => true])->assertExitCode(0);
+    $this->artisan('migrate:rollback', ['--step' => 5, '--force' => true])->assertExitCode(0);
     $generation = Generation::factory()->create(['next_sync_at' => now()->addMinutes(5)]);
     $completed = Generation::factory()->create(['status' => 'succeeded', 'provider_cost' => '0.011225', 'user_charge' => '0.01403125', 'completed_at' => now(), 'next_sync_at' => null]);
     WebhookEvent::create(['id' => 'evt_before_upgrade', 'type' => 'ping', 'payload' => ['object' => 'event']]);
@@ -141,4 +128,27 @@ test('upgrading the original schema preserves records and active cooldown deadli
     expect(WebhookEvent::findOrFail('evt_before_upgrade')->attempts)->toBe(0);
     expect(WebhookEvent::findOrFail('evt_before_upgrade')->payload)->toBe(['object' => 'event']);
     $this->assertDatabaseCount('generations', 2);
+});
+
+test('the bonus upgrade preserves existing accounts historical billing and in flight submission parameters', function () {
+    $this->artisan('migrate:rollback', ['--step' => 2, '--force' => true])->assertExitCode(0);
+    $pending = Generation::factory()->create(['provider_id' => 'gen_before_credit_upgrade', 'submission_uncertain' => true, 'retry_not_before' => now()->addMinutes(5), 'sync_attempts' => 2]);
+    $completed = Generation::factory()->for($pending->user)->create(['status' => 'succeeded', 'provider_cost' => '0.016812500', 'user_charge' => '0.021015625', 'completed_at' => now(), 'next_sync_at' => null]);
+    $parameters = $pending->providerParameters();
+    $userAttributes = $pending->user->getAttributes();
+    $this->artisan('migrate', ['--force' => true])->assertExitCode(0);
+    expect($pending->fresh()->providerParameters())->toBe($parameters);
+    expect($pending->fresh()->request_key)->toBe($pending->request_key);
+    expect($pending->fresh()->retry_not_before->timestamp)->toBe($pending->retry_not_before->timestamp);
+    expect($pending->fresh()->credit_account_id)->toBeNull();
+    expect($completed->fresh()->user_charge)->toBe('0.021015625000000000');
+    expect($completed->fresh()->provider_cost)->toBe('0.016812500000000000');
+    expect($completed->fresh()->provider_scope)->toBeNull();
+    expect($pending->user->fresh()->is_operator)->toBeFalse();
+    foreach ($userAttributes as $key => $value) {
+        expect($pending->user->fresh()->getRawOriginal($key))->toBe($value);
+    }
+    expect(app(Credits::class)->forUser($pending->user))->toBe(['available' => '0.000000000000000000', 'reserved' => '0.000000000000000000', 'outstanding' => '0.000000000000000000']);
+    $this->assertDatabaseCount('credit_entries', 0);
+    $this->assertDatabaseCount('credit_accounts', 0);
 });

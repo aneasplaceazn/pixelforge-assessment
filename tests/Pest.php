@@ -1,7 +1,11 @@
 <?php
 
 use App\Models\Generation;
+use App\Models\User;
+use App\Services\Credits;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -57,4 +61,39 @@ function sendPixelforgeEvent(array $event, ?string $signature = null): TestRespo
 function generationEvent(Generation $generation, string $status, string $id = 'evt_test'): array
 {
     return ['id' => $id, 'object' => 'event', 'type' => 'generation.'.$status, 'data' => ['object' => pixelforgeSnapshot($generation, $status)]];
+}
+
+function generationSettings(): array
+{
+    return ['prompt' => 'A lighthouse', 'size' => '1024x1024', 'quality' => 'low', 'reference_images' => []];
+}
+
+function fakePricing(): void
+{
+    Http::fake(['*/v1/pricing' => Http::response(json_decode(file_get_contents(__DIR__.'/Fixtures/pricing.json'), true))]);
+}
+
+function assertBlockedPostgresWorkers(string $name, int $expected): void
+{
+    $deadline = microtime(true) + 10;
+    do {
+        DB::select('select pg_stat_clear_snapshot()');
+        $blocked = DB::selectOne("select count(*) as count from pg_stat_activity where application_name = ? and wait_event_type = 'Lock'", [$name])->count;
+        if ((int) $blocked === $expected) {
+            break;
+        }
+        usleep(10000);
+    } while (microtime(true) < $deadline);
+    expect((int) $blocked)->toBe($expected, 'All workers must overlap and wait on real PostgreSQL locks.');
+}
+
+function reservedGeneration(User $user, string $amount = '3'): Generation
+{
+    return DB::transaction(function () use ($user, $amount) {
+        User::query()->lockForUpdate()->findOrFail($user->id);
+        $generation = Generation::factory()->for($user)->create(['estimated_cost' => bcdiv($amount, '1.25', 18), 'estimated_charge' => $amount]);
+        app(Credits::class)->reserve($user, $generation);
+
+        return $generation;
+    });
 }

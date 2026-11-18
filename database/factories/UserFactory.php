@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\User;
+use App\Services\Credits;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -12,6 +13,11 @@ use Illuminate\Support\Str;
  */
 class UserFactory extends Factory
 {
+    public function withCredits(): static
+    {
+        return $this->afterCreating(fn (User $user) => app(Credits::class)->purchase($user, '20', (string) Str::uuid()));
+    }
+
     /**
      * The current password being used by the factory.
      */

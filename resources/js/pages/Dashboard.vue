@@ -4,6 +4,9 @@ import { computed, ref, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { money } from '@/lib/money';
+import { index as creditsPage } from '@/routes/credits';
+import { index as reportsPage } from '@/routes/reports';
 import { dashboard } from '@/routes';
 import { estimate, retry, store } from '@/routes/generations';
 
@@ -29,12 +32,15 @@ type Settings = {
     reference_images: string[];
 };
 type Quote = {
+    can_afford: boolean;
     user_charge: string;
     provider_cost: string;
     quote: string;
     expires_at: number;
 };
 const props = defineProps<{
+    credits: { available: string; reserved: string; outstanding: string };
+    can_report: boolean;
     generations: {
         data: Generation[];
         current_page: number;
@@ -83,7 +89,7 @@ function retryImage(generation: Generation) {
         (imageAttempts.value[generation.id] ?? 0) + 1;
     imageErrors.value[generation.id] = false;
 }
-usePoll(3000, { only: ['generations'] });
+usePoll(3000, { only: ['generations', 'credits'] });
 watch(
     [() => form.prompt, () => form.size, () => form.quality, referenceText],
     () => {
@@ -98,14 +104,6 @@ watch(
         quoting.clearErrors();
     },
 );
-function money(value: string): string {
-    return (
-        '$' +
-        (value.includes('.')
-            ? value.replace(/0+$/, '').replace(/\.$/, '.00')
-            : value)
-    );
-}
 async function getEstimate() {
     message.value = '';
     quote.value = null;
@@ -116,8 +114,12 @@ async function getEstimate() {
         reference_images: form.reference_images,
     }));
     try {
-        quote.value = await quoting.post(estimate.url());
-        form.quote = quote.value.quote;
+        const result = await quoting.post(estimate.url());
+        if (!result) {
+            throw new Error('Estimate unavailable');
+        }
+        quote.value = result;
+        form.quote = result.quote;
     } catch {
         message.value = quoting.hasErrors
             ? 'Please check the highlighted settings.'
@@ -180,6 +182,25 @@ function useAgain(generation: Generation) {
                 >Simulated images · No real payments</span
             >
         </header>
+        <section
+            aria-label="Credit balance"
+            class="flex flex-wrap items-center gap-4 rounded-xl border p-4 text-sm"
+        >
+            <span
+                >Available:
+                <strong>{{ money(credits.available) }}</strong></span
+            >
+            <span>Reserved: {{ money(credits.reserved) }}</span>
+            <Link :href="creditsPage()" class="font-medium underline"
+                >Buy credits</Link
+            >
+            <Link
+                v-if="can_report"
+                :href="reportsPage()"
+                class="font-medium underline"
+                >Financial reports</Link
+            >
+        </section>
         <div
             class="grid items-start gap-8 lg:grid-cols-[minmax(280px,360px)_1fr]"
         >
@@ -365,6 +386,15 @@ function useAgain(generation: Generation) {
                             :message="form.errors.quote"
                         />
                     </div>
+                    <p
+                        v-if="quote && !quote.can_afford"
+                        id="credit-error"
+                        role="status"
+                        class="text-sm text-destructive"
+                    >
+                        Insufficient available credits. Buy simulated credits,
+                        then refresh this estimate.
+                    </p>
                     <Button
                         type="submit"
                         class="w-full"
@@ -372,7 +402,10 @@ function useAgain(generation: Generation) {
                             form.errors.quote ? 'quote-error' : undefined
                         "
                         :disabled="
-                            busy || !form.prompt.trim() || promptLength > 4000
+                            busy ||
+                            !form.prompt.trim() ||
+                            promptLength > 4000 ||
+                            (quote !== null && !quote.can_afford)
                         "
                     >
                         {{

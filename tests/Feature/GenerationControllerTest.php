@@ -13,16 +13,6 @@ beforeEach(function () {
     Http::preventStrayRequests();
 });
 
-function generationSettings(): array
-{
-    return ['prompt' => 'A lighthouse', 'size' => '1024x1024', 'quality' => 'low', 'reference_images' => []];
-}
-
-function fakePricing(): void
-{
-    Http::fake(['*/v1/pricing' => Http::response(json_decode(file_get_contents(__DIR__.'/../Fixtures/pricing.json'), true))]);
-}
-
 test('generation operations require authentication', function () {
     $this->post(route('generations.estimate'), generationSettings())->assertRedirect(route('login'));
     $this->post(route('generations.store'), generationSettings())->assertRedirect(route('login'));
@@ -46,7 +36,7 @@ test('price must be reviewed and matches the exact settings and user', function 
 test('confirmed requests survive duplicate submits without creating duplicate generations', function () {
     fakePricing();
     Queue::fake([SyncGeneration::class]);
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
     $quote = $this->postJson(route('generations.estimate'), generationSettings())->assertOk()->json('quote');
     $payload = [...generationSettings(), 'quote' => $quote, 'user_charge' => '999', 'status' => 'succeeded'];
 
@@ -61,7 +51,7 @@ test('confirmed requests survive duplicate submits without creating duplicate ge
 });
 
 test('invalid generation settings fail before contacting the provider', function (array $change, string $field) {
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
 
     $this->postJson(route('generations.estimate'), [...generationSettings(), ...$change])->assertUnprocessable()->assertJsonValidationErrors($field);
 
@@ -87,7 +77,7 @@ test('history is private and excludes provider secrets and other users', functio
 test('expired and tampered quotes are rejected', function () {
     fakePricing();
     $this->freezeTime();
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
     $quote = $this->postJson(route('generations.estimate'), generationSettings())->json('quote');
     $this->travel(6)->minutes();
 
@@ -127,7 +117,7 @@ test('reference URLs survive price confirmation and provider submission unchange
         return Http::response(pixelforgeSnapshot($generation, 'queued'), 202);
     }]);
     $settings = ['prompt' => str_repeat('🌅', 400), 'size' => '1536x1024', 'quality' => 'high', 'reference_images' => ['https://example.com/one.png', 'http://example.com/two.png']];
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
     $quote = $this->postJson(route('generations.estimate'), $settings)->assertOk()->assertJsonPath('user_charge', '0.467343750000000000')->json('quote');
 
     $this->post(route('generations.store'), [...$settings, 'quote' => $quote])->assertRedirect(route('dashboard'));
@@ -139,7 +129,7 @@ test('reference URLs survive price confirmation and provider submission unchange
 test('maximum valid prompts and references complete price confirmation', function (string $prompt) {
     fakePricing();
     Queue::fake([SyncGeneration::class]);
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
     $url = 'https://example.com/'.str_repeat('a', 2048 - strlen('https://example.com/'));
     $settings = [...generationSettings(), 'prompt' => $prompt, 'reference_images' => array_fill(0, 4, $url)];
     $quote = $this->postJson(route('generations.estimate'), $settings)->assertOk()->json('quote');
@@ -159,7 +149,7 @@ test('maximum valid prompts and references complete price confirmation', functio
 test('quote cache loss fails closed but an already saved request remains idempotent after expiry', function () {
     fakePricing();
     Queue::fake([SyncGeneration::class]);
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
     $lost = $this->postJson(route('generations.estimate'), generationSettings())->assertOk()->json('quote');
     Cache::forget('generation-quote:'.$lost);
     $this->postJson(route('generations.store'), [...generationSettings(), 'quote' => $lost])->assertUnprocessable()->assertJsonValidationErrors('quote');

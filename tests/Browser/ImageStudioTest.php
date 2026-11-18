@@ -33,7 +33,8 @@ test('registration through final billing works in the browser', function () {
     ]);
     $page = visit('/register')->fill('name', 'Studio Visitor')->fill('email', 'browser@example.test')
         ->fill('password', 'a-safe-test-password')->fill('password_confirmation', 'a-safe-test-password')->press('Create account')
-        ->assertSee('A thought. An image.')->fill('#prompt', 'A lighthouse')->select('#quality', 'low')
+        ->assertSee('A thought. An image.')->click('Buy credits')->press('Add simulated credits')->assertSee('Credits added.')
+        ->click('Back to image studio')->fill('#prompt', 'A lighthouse')->select('#quality', 'low')
         ->press('Get price estimate')->assertSee('Maximum estimated price')->assertSee('$0.0218375')
         ->press('Generate image')->assertSee('Waiting to generate')->assertSee('Pending');
     $generation = Generation::firstOrFail();
@@ -45,6 +46,9 @@ test('registration through final billing works in the browser', function () {
     $page->assertSee('$0.01401875')->assertSee('succeeded')->assertVisible('[data-generation-id] img')
         ->assertScript('document.querySelector("[data-generation-id] img").complete && document.querySelector("[data-generation-id] img").naturalWidth === 1024')
         ->assertNoJavascriptErrors()->screenshot(filename: 'image-studio-desktop');
+    $page->refresh()->assertSee('$0.01401875')->assertSee('succeeded')->assertSee('$4.98598125')
+        ->assertScript('document.querySelector("[data-generation-id] img").complete && document.querySelector("[data-generation-id] img").naturalWidth === 1024')
+        ->assertNoJavascriptErrors();
     expect($generation->fresh()->user_charge)->toBe('0.014018750000000000');
     expect(bccomp($generation->fresh()->user_charge, $generation->estimated_charge, 18))->toBeLessThanOrEqual(0);
 });

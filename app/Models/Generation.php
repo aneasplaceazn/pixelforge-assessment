@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property array<string, mixed> $pricing_snapshot
  * @property array<string, int>|null $usage
  * @property array<string, string>|null $rates
+ * @property array<string, string>|null $provider_metadata
  */
 class Generation extends Model
 {
@@ -39,6 +40,7 @@ class Generation extends Model
             'reference_images' => 'array',
             'submission_uncertain' => 'boolean',
             'pricing_snapshot' => 'array',
+            'provider_metadata' => 'array',
             'usage' => 'array',
             'rates' => 'array',
             'estimated_cost' => 'decimal:18',
@@ -71,11 +73,15 @@ class Generation extends Model
     public function nextCheckAt(int $delay = 0): CarbonImmutable
     {
         $at = CarbonImmutable::now()->addSeconds($delay);
+        if ($delay > 0) {
+            // Eloquent persists whole seconds; truncating fractions would permit an early retry.
+            $at = $at->ceilSecond();
+        }
 
         return $this->retry_not_before?->greaterThan($at) ? $this->retry_not_before : $at;
     }
 
-    /** @return array{prompt: string, size: string, quality: string, reference_images: list<string>, metadata: array{generation_id: string}} */
+    /** @return array{prompt: string, size: string, quality: string, reference_images: list<string>, metadata: array<string, string>} */
     public function providerParameters(): array
     {
         return [
@@ -83,7 +89,7 @@ class Generation extends Model
             'size' => $this->size,
             'quality' => $this->quality,
             'reference_images' => $this->reference_images,
-            'metadata' => ['generation_id' => $this->id],
+            'metadata' => $this->provider_metadata ?? ['generation_id' => $this->id],
         ];
     }
 }

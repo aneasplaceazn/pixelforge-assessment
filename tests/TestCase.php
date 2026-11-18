@@ -11,5 +11,6 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
         Http::preventStrayRequests();
+        config(['services.pixelforge.account_scope' => 'test-'.bin2hex(random_bytes(12))]);
     }
 }

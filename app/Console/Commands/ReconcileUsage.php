@@ -25,6 +25,12 @@ class ReconcileUsage extends Command
 
             return self::FAILURE;
         }
+        if (Generation::query()->whereNull('provider_scope')->where('completed_at', '>=', CarbonImmutable::parse($start, 'UTC'))->where('completed_at', '<', CarbonImmutable::parse($end, 'UTC')->addDay())->exists()) {
+            $this->error('UNVERIFIED: legacy generation scope is unknown. Verify the dedicated key before running pixelforge:adopt-scope.');
+
+            return self::FAILURE;
+        }
+        $scope = hash('sha256', (string) config('services.pixelforge.api_key'));
         try {
             $usage = $client->usage($start, $end);
         } catch (ProviderException $exception) {
@@ -53,6 +59,7 @@ class ReconcileUsage extends Command
         foreach ($usage['data'] as $day) {
             $date = CarbonImmutable::parse($day['date'], 'UTC');
             $local = (string) Generation::query()->where('status', 'succeeded')
+                ->where('provider_scope', $scope)
                 ->where('completed_at', '>=', $date)->where('completed_at', '<', $date->addDay())->sum('provider_cost');
             if (! is_numeric($local)) {
                 $this->error('Invalid local cost total.');

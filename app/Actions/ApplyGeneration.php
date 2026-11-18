@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Models\Generation;
+use App\Services\Credits;
 use App\Services\Pixelforge\PricingCalculator;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -11,7 +12,7 @@ use InvalidArgumentException;
 
 class ApplyGeneration
 {
-    public function __construct(private PricingCalculator $pricing) {}
+    public function __construct(private PricingCalculator $pricing, private Credits $credits) {}
 
     /** @param array<string, mixed> $snapshot */
     public function handle(array $snapshot, ?string $expectedId = null): bool
@@ -98,6 +99,7 @@ class ApplyGeneration
                 }
             }
             $generation->save();
+            $this->credits->settle($generation);
 
             return true;
         }, 3);

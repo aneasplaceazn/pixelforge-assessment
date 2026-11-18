@@ -4,8 +4,10 @@ namespace App\Jobs;
 
 use App\Actions\ApplyGeneration;
 use App\Models\Generation;
+use App\Services\Credits;
 use App\Services\Pixelforge\Client;
 use App\Services\Pixelforge\ProviderException;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -78,16 +80,25 @@ class SyncGeneration implements ShouldBeUnique, ShouldQueue
             if ($generation->isTerminal()) {
                 return;
             }
+            if ($exception->deferred) {
+                $generation->sync_attempts = max(0, $generation->sync_attempts - 1);
+            }
             $generation->submission_uncertain = $wasUncertain || $exception->uncertain;
             $generation->error_code = $exception->providerCode;
             $generation->error_message = $exception->getMessage();
             $delay = max($exception->retryAfter, 5 * (2 ** min($generation->sync_attempts, 8)));
+            if ($exception->deferred) {
+                $delay = $exception->retryNotBefore === null ? $exception->retryAfter : 0;
+            }
             $generation->retry_not_before = $generation->nextCheckAt($delay);
+            if ($exception->retryNotBefore !== null && $generation->retry_not_before->getTimestamp() < $exception->retryNotBefore) {
+                $generation->retry_not_before = CarbonImmutable::createFromTimestampUTC($exception->retryNotBefore);
+            }
             $generation->next_sync_at = $exception->retryable && $generation->sync_attempts < 5 ? $generation->retry_not_before : null;
             if ($generation->next_sync_at === null && $exception->retryable) {
                 $generation->error_message = Generation::PAUSED_MESSAGE;
             }
-            if ((! $exception->retryable || $generation->user_id === null) && ! $generation->submission_uncertain && $generation->provider_id === null) {
+            if (! $exception->deferred && (! $exception->retryable || $generation->user_id === null) && ! $generation->submission_uncertain && $generation->provider_id === null) {
                 $generation->status = 'failed';
                 $generation->provider_cost = '0';
                 $generation->user_charge = '0';
@@ -99,6 +110,7 @@ class SyncGeneration implements ShouldBeUnique, ShouldQueue
                 }
             }
             $generation->save();
+            app(Credits::class)->settle($generation);
         });
     }
 }

@@ -13,7 +13,7 @@ test('contract-consistent usage settles through HTTP and stays within its unchan
         '*/v1/pricing' => Http::response($pricing),
         '*/v1/generations' => fn ($request) => Http::response(pixelforgeSnapshot(Generation::findOrFail($request['metadata']['generation_id']), 'queued'), 202),
     ]);
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->withCredits()->create());
     $parameters = ['prompt' => str_repeat('😀', 4000), 'size' => $size, 'quality' => $quality, 'reference_images' => array_fill(0, 4, 'https://example.test/'.str_repeat('a', 2048 - strlen('https://example.test/')))];
     $quote = $this->postJson(route('generations.estimate'), $parameters)->assertOk()->json();
     $this->post(route('generations.store'), [...$parameters, 'quote' => $quote['quote']])->assertRedirect(route('dashboard'));

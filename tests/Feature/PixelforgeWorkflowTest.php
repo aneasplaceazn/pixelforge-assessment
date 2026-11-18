@@ -49,7 +49,7 @@ test('definitive submission rejection is free and never retried automatically', 
 })->with([[401, 'invalid_api_key'], [422, 'validation_failed'], [409, 'idempotency_key_reused'], [400, 'content_policy_violation'], [429, 'daily_limit_exceeded']]);
 
 test('transient rejections respect Retry-After and remain uncharged', function (int $status, string $code) {
-    $this->freezeTime();
+    $this->freezeSecond();
     $generation = Generation::factory()->create();
     Http::fake(['*/v1/generations' => Http::response(['error' => ['code' => $code]], $status, ['Retry-After' => '120'])]);
 
@@ -158,7 +158,7 @@ test('the shared request budget throttles before contacting the provider', funct
 });
 
 test('manual resume after exhausted retries cannot bypass the provider cooldown', function () {
-    $this->freezeTime();
+    $this->freezeSecond();
     $generation = Generation::factory()->create(['sync_attempts' => 4]);
     Http::fake(['*/v1/generations' => Http::sequence()
         ->push(['error' => ['code' => 'rate_limit_exceeded']], 429, ['Retry-After' => '300'])
@@ -180,7 +180,7 @@ test('manual resume after exhausted retries cannot bypass the provider cooldown'
 });
 
 test('delayed processing events preserve the retrieval cooldown', function () {
-    $this->freezeTime();
+    $this->freezeSecond();
     $generation = Generation::factory()->create(['provider_id' => 'gen_cooldown', 'status' => 'processing']);
     Http::fake(['*/v1/generations/gen_cooldown' => Http::sequence()
         ->push(['error' => ['code' => 'rate_limit_exceeded']], 429, ['Retry-After' => '120'])

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\GenerationRequest;
+use App\Services\Credits;
 use App\Services\Pixelforge\Client;
 use App\Services\Pixelforge\PricingCalculator;
 use App\Services\Pixelforge\ProviderException;
@@ -32,6 +33,6 @@ class GenerationEstimateController extends Controller
 
         Cache::put('generation-quote:'.$quote['request_key'], $quote, now()->addMinutes(5));
 
-        return response()->json([...$estimate, 'quote' => $quote['request_key'], 'expires_at' => $quote['expires_at']]);
+        return response()->json([...$estimate, 'quote' => $quote['request_key'], 'expires_at' => $quote['expires_at'], 'can_afford' => app(Credits::class)->canAfford($request->user(), $estimate['user_charge'])]);
     }
 }

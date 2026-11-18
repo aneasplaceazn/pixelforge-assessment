@@ -6,6 +6,7 @@ use App\Http\Requests\GenerationRequest;
 use App\Jobs\SyncGeneration;
 use App\Models\Generation;
 use App\Models\User;
+use App\Services\Credits;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -34,7 +35,7 @@ class GenerationController extends Controller
                 'created_at' => $generation->created_at?->toIso8601String(),
             ]);
 
-        return Inertia::render('Dashboard', ['generations' => $generations]);
+        return Inertia::render('Dashboard', ['generations' => $generations, 'credits' => app(Credits::class)->forUser($request->user()), 'can_report' => $request->user()->can('financial-reports')]);
     }
 
     public function store(GenerationRequest $request): RedirectResponse
@@ -59,7 +60,7 @@ class GenerationController extends Controller
         $generation = DB::transaction(function () use ($request, $quote): Generation {
             abort_unless(User::query()->lockForUpdate()->find($request->user()->id) !== null, 403);
 
-            return Generation::query()->firstOrCreate(['request_key' => $quote['request_key']], [
+            $generation = Generation::query()->firstOrCreate(['request_key' => $quote['request_key']], [
                 ...$request->parameters(),
                 'user_id' => $request->user()->id,
                 'pricing_snapshot' => $quote['pricing'],
@@ -67,8 +68,18 @@ class GenerationController extends Controller
                 'estimated_charge' => $quote['estimate']['user_charge'],
                 'next_sync_at' => now(),
             ]);
+            abort_unless($generation->user_id === $request->user()->id, 404);
+            if ($generation->wasRecentlyCreated) {
+                $scope = hash('sha256', (string) config('services.pixelforge.api_key'));
+                $generation->update(['provider_scope' => $scope, 'provider_metadata' => ['generation_id' => $generation->id, 'scope' => $scope]]);
+                app(Credits::class)->reserve($request->user(), $generation);
+            }
+
+            return $generation;
         }, 3);
-        SyncGeneration::dispatch($generation->id);
+        if ($generation->wasRecentlyCreated) {
+            SyncGeneration::dispatch($generation->id);
+        }
 
         return to_route('dashboard');
     }
