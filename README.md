@@ -13,6 +13,7 @@ The Vue/Inertia interface uses compiled Tailwind assets. Laravel owns authentica
 3. Use **Buy credits** to add simulated $5, $10 or $20 credits. New accounts start with zero credits; reviewer credits may be prepared in advance. Existing generations are never debited retroactively. Enter a prompt, choose size and quality, and optionally add reference URLs. Select **Get price estimate** to see the maximum estimated user price, including the 25% markup.
 4. Select **Generate image** only after reviewing that estimate. The history updates automatically through queued, processing, succeeded or failed states.
 5. Completed cards show the image, estimated price and exact final charge. Reloading the page preserves history. Failed generations show zero charge; unresolved requests are not mislabeled as free failures.
+6. With the privately supplied reviewer account, select **Financial reports** to inspect daily and per-user charges, provider costs and profit, filter by UTC dates, and compare with PixelForge. Newly registered accounts cannot access these reports.
 
 Provider image URLs expire 24 hours after completion. History and accounting remain available after the image expires; this application does not archive the PNGs. Prepare reviewer samples close to review time. Prompt reuse creates a new generation and requires a fresh estimate.
 
@@ -141,10 +142,12 @@ Hosted acceptance verified both bonuses through the real UI, PostgreSQL, Valkey,
 - A successful generation cost **0.015190000 USD** at generation-specific rates; its exact 25% markup produced a **0.018987500 USD** user charge. One settlement and the unused reservation release were recorded. The PNG decoded and history survived reload.
 - A failed generation recorded zero provider cost and user charge and released its full reservation without a settlement.
 - Signed terminal webhook replays, each delivered twice, left the ledger and generation records unchanged. Invalid signatures were rejected. Duplicate and out-of-order handling also have automated regression coverage.
-- Operator authorization, daily/per-user totals and exact profit passed. The new day's local provider cost matched `GET /v1/usage` exactly. Temporary operator access was revoked after testing; normal accounts cannot view reports.
+- Operator authorization, daily/per-user totals and exact profit passed. The new day's local provider cost matched `GET /v1/usage` exactly. Temporary operator access was revoked after that acceptance test. The designated reviewer account was subsequently granted reporting access with explicit approval; login, sample history and report access passed, and an ordinary account was denied both report viewing and comparison with HTTP 403.
 - Queues drained, no failed jobs or pending webhook events remained, and scheduled reconciliation ran using the approved code. These are bounded acceptance results, not a sustained-load test.
 
-**Reconciliation limitation:** historical records with unknown provider-key scope and an unresolved legacy request remain explicitly **unverified**. Equality of completed monetary totals does not prove full historical inventory completeness. No scope or financial record was silently corrected. Other limitations remain: image URLs expire after 24 hours, production password-reset email is unavailable, and the dependency advisory below is unresolved.
+**Historical reconciliation update — 2026-11-18 UTC:** four legacy requests were explicitly attributed to the Production key using the owner's continuous-key deployment history and corroborating application/provider records. An approved, guarded operation changed only their scope markers; financial values, timestamps, request parameters, idempotency keys and retry states remained unchanged. Fresh comparisons for November 17 and 18 matched provider costs, billed counts and token totals: **0.055702500 USD** provider cost and **0.069628125 USD** user charges, including exactly 25% markup. Failed generations remain free.
+
+**Remaining reconciliation limitation:** one rejected legacy request remains paused and is reported as pending; three account-wide provider records associated with earlier local development lack confirmed creator-key metadata, so inventory completeness remains **unverified**. The established Production billing cohort reconciles, but this does not prove full account-wide inventory completeness. Other limitations remain: image URLs expire after 24 hours, production password-reset email is unavailable, and the dependency advisory below is unresolved.
 
 ## Credits and operator reports
 
@@ -183,7 +186,7 @@ Legacy generations have no automatically assumed key scope. First independently 
 ./vendor/bin/sail artisan pixelforge:adopt-scope --confirm-dedicated-key --no-interaction
 ```
 
-Adoption changes only the scope marker, never old provider parameters, costs, or balances. If legacy rows span keys, do not run the blanket adoption command; investigate individual provenance before a reviewed data migration. Changing keys while a submission is unresolved pauses new POSTs for that scoped request and retains its reservation. Resolve it with its original key; never silently replay a new create under a different billing scope.
+The bare adoption command assigns the scope marker and normally updates `updated_at`; it does not change provider parameters, costs or balances. The approved production adoption used a separately reviewed transaction wrapper with exact-row guards, timestamp updates suppressed, and before/after checks proving that only `provider_scope` changed. If legacy rows span keys, do not run the blanket adoption command; investigate individual provenance before a reviewed data migration. Changing keys while a submission is unresolved pauses new POSTs for that scoped request and retains its reservation. Resolve it with its original key; never silently replay a new create under a different billing scope.
 
 ### Migration and release safety
 
