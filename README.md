@@ -1,6 +1,6 @@
 # PixelForge image studio
 
-A Laravel 13 / Vue 3 / Inertia 3 application for the [PromptEdit assessment](https://pixelforge.promptedit.dev/assessment). Users can register, request images with prompts, sizes, quality levels and optional references, review maximum prices, and follow their private generation history through completion. Exact usage-based charges include a 25% markup; failed generations are free. The local implementation also includes simulated credit purchases, concurrent credit reservations, and operator financial reports. No real payments are taken. The bonus features and retry-precision fix are pending an approved release; the live application still runs the earlier implementation.
+A Laravel 13 / Vue 3 / Inertia 3 application for the [PromptEdit assessment](https://pixelforge.promptedit.dev/assessment). Users can register, request images with prompts, sizes, quality levels and optional references, review maximum prices, and follow their private generation history through completion. Exact usage-based charges include a 25% markup; failed generations are free. The mandatory functionality and both optional bonuses are deployed: simulated credit purchases, concurrent credit reservations, and operator financial reports. No real payments are taken. Production acceptance verified successful and failed generations, exact billing, credit settlement and release, signed duplicate webhooks, reports, and provider usage comparison.
 
 **Live application:** [PixelForge image studio](https://pixelforge-assessment-production-xt3tlo.laravel.cloud).
 
@@ -10,7 +10,7 @@ The Vue/Inertia interface uses compiled Tailwind assets. Laravel owns authentica
 
 1. Open the live application and select **Log in**. Use the reviewer credentials supplied privately with the submission, or register your own account. Credentials are never published in this repository.
 2. The **Image studio** shows the signed-in account's sample generations under **Your generations**. Another account's history is intentionally inaccessible.
-3. After the bonus release, use **Buy credits** to add simulated $5, $10 or $20 credits. New and existing accounts begin with zero credits; existing generations are never debited retroactively. Enter a prompt, choose size and quality, and optionally add reference URLs. Select **Get price estimate** to see the maximum estimated user price, including the 25% markup.
+3. Use **Buy credits** to add simulated $5, $10 or $20 credits. New accounts start with zero credits; reviewer credits may be prepared in advance. Existing generations are never debited retroactively. Enter a prompt, choose size and quality, and optionally add reference URLs. Select **Get price estimate** to see the maximum estimated user price, including the 25% markup.
 4. Select **Generate image** only after reviewing that estimate. The history updates automatically through queued, processing, succeeded or failed states.
 5. Completed cards show the image, estimated price and exact final charge. Reloading the page preserves history. Failed generations show zero charge; unresolved requests are not mislabeled as free failures.
 
@@ -96,7 +96,7 @@ php artisan view:cache
 rm -rf node_modules
 ```
 
-The currently deployed command is `php artisan migrate --force --no-interaction`. The first credit-aware release requires the full-stop cutover below; this existing command alone does not prevent mixed-version settlement. Cloud manages release and worker replacement; do not add cache-clearing or worker-restart commands to deployment. Documentation-only commits do not require redeploying the unchanged application.
+The completed first credit-aware release used a full-stop cutover. Its one-time command remains configured: `php artisan down --retry=60 --no-interaction && php artisan migrate --force --no-interaction`. Maintenance was explicitly lifted after verification. Changing the command to `php artisan migrate --force --no-interaction` for future compatible releases requires separate approval; it has not been changed. Cloud manages release and worker replacement; do not add cache-clearing or worker-restart commands to deployment. Documentation-only commits do not require redeploying the unchanged application.
 
 One colocated background process runs `php artisan queue:work redis --queue=default --tries=3 --backoff=30 --sleep=1 --timeout=30 --quiet`. `REDIS_QUEUE_RETRY_AFTER=90` exceeds the worker timeout. Cloud's scheduler runs Laravel's schedule every minute, including `pixelforge:reconcile` with overlapping runs prevented. Shared Valkey uses `noeviction` to avoid silently dropping queued work; monitor capacity and failed jobs.
 
@@ -106,9 +106,9 @@ Cloud injects database and cache connections. Production settings include a pers
 
 Monitor failed jobs, pending/failed inbox events and paused generations. `pixelforge:webhooks` lists up to 50 quarantined events and exits 1 when any exist; investigate before using `pixelforge:webhooks EVENT_ID --retry`. It never prints payloads. The scheduler scans at most 100 inbox events and 40 due generations per minute. Restore procedures and sustained-load capacity have not been exercised on this assessment deployment. Compute can pause at the configured spending threshold, interrupting scheduled work until service resumes; storage charges can continue. Preserve records and reconcile pending work before an approved shutdown.
 
-## Production verification — 2026-11-17 UTC
+## Historical production verification — 2026-11-17 UTC
 
-The deployed application source is `2a7e9219d0d811c43efb12ee1fa971a2bedb2dfc`. GitHub CI on that source passed 148 tests and 802 assertions, plus code style, static analysis, frontend checks and build. Those automated tests simulate the provider; the following checks used the hosted application and dedicated production provider key:
+The application source deployed for these earlier checks was `2a7e9219d0d811c43efb12ee1fa971a2bedb2dfc`. GitHub CI on that source passed 148 tests and 802 assertions, plus code style, static analysis, frontend checks and build. Those automated tests simulate the provider; the following checks used the hosted application and dedicated production provider key:
 
 - Native production build and all nine migrations succeeded. HTTPS, health checks, registration/login/logout, database sessions, cache operations, lock exclusion/release, secure cookies, compiled assets and mobile layout passed.
 - The actual Cloud scheduler recovered an undispatched inbox ping, and the Redis worker processed it once. A provider-originated dashboard ping verified the configured webhook URL and signing secret. Invalid, missing, expired and tampered signatures were rejected.
@@ -127,11 +127,26 @@ Three additional controlled production scenarios passed on 2026-11-17/18 UTC: `[
 
 These checks cover the specified scenarios, not all possible failures. Sustained load was deliberately skipped; backup restoration remains unverified. Additional reviewer samples require separate approval and should be generated near submission because image URLs expire.
 
-**Local follow-up, 2026-11-18 UTC; not yet deployed:** one separately approved isolated provider request captured HTTP 503 with `Retry-After: 2`. Its cooldown exceeded two seconds, but a simulated 300-second header exposed fractional-second truncation that could permit a retry up to almost one second early. The local fix rounds positive generation delays upward before persistence. Eighteen new regression cases cover fractional boundaries, later cooldowns, all five backoffs, HTTP/CLI resume, delayed signed webhooks and scheduled recovery. The full Sail/PostgreSQL suite passed **166 tests / 932 assertions**, with no failures or skips; PHPStan, Pint, frontend lint/format/types and the production build passed. No further provider requests were made while fixing it. See [F08 evidence and deployment considerations](AUDIT.md#f08-fractional-retry-deadline-remediation--2026-11-18-utc). The hosted application still needs an approved release of this fix; earlier hosted checks do not verify the revised code.
+**Historical local follow-up, 2026-11-18 UTC; before the production release:** one separately approved isolated provider request captured HTTP 503 with `Retry-After: 2`. Its cooldown exceeded two seconds, but a simulated 300-second header exposed fractional-second truncation that could permit a retry up to almost one second early. The local fix rounds positive generation delays upward before persistence. Eighteen new regression cases cover fractional boundaries, later cooldowns, all five backoffs, HTTP/CLI resume, delayed signed webhooks and scheduled recovery. The full Sail/PostgreSQL suite passed **166 tests / 932 assertions**, with no failures or skips; PHPStan, Pint, frontend lint/format/types and the production build passed. No further provider requests were made while fixing it. See [F08 evidence and deployment considerations](AUDIT.md#f08-fractional-retry-deadline-remediation--2026-11-18-utc). At that stage the fix was not deployed; the later production release is recorded below.
 
-Both optional features are implemented locally. The initial bonus suite passed **210 tests / 1,294 assertions**, including nine browser and twelve PostgreSQL/Redis integration cases, with zero failures or skips. Pint, PHPStan, frontend lint/format, Vue types, production build and Composer audit passed; npm audit retains the documented advisory. See the latest bonus acceptance addendum in [AUDIT.md](AUDIT.md) and [INDEPENDENT_REVIEW.md](INDEPENDENT_REVIEW.md) for executed checks, the requirement matrix, limitations, and deployment gates. Earlier hosted results do not verify the new financial workflows.
+Both optional features were initially verified locally. The initial bonus suite passed **210 tests / 1,294 assertions**, including nine browser and twelve PostgreSQL/Redis integration cases, with zero failures or skips. Pint, PHPStan, frontend lint/format, Vue types, production build and Composer audit passed; npm audit retains the documented advisory. See the latest bonus acceptance addendum in [AUDIT.md](AUDIT.md) and [INDEPENDENT_REVIEW.md](INDEPENDENT_REVIEW.md) for executed checks, the requirement matrix, limitations, and deployment gates. The earlier hosted results predate these financial workflows; later production acceptance is recorded below.
 
-## Credits and operator reports (pending production release)
+## Current production verification — 2026-11-18 UTC
+
+Production runs approved application commit `83ef82c06a4149a952a1b1e22ebdc0891b802316`. Later README-only commits do not require redeployment. The final independent verification and CI passed **255 tests / 1,590 assertions**; the controlled production release applied all eleven migrations and preserved existing financial records.
+
+Hosted acceptance verified both bonuses through the real UI, PostgreSQL, Valkey, queue worker, scheduler, and provider:
+
+- Insufficient credits blocked submission. One simulated purchase added credit once despite a repeated purchase key.
+- A successful generation cost **0.015190000 USD** at generation-specific rates; its exact 25% markup produced a **0.018987500 USD** user charge. One settlement and the unused reservation release were recorded. The PNG decoded and history survived reload.
+- A failed generation recorded zero provider cost and user charge and released its full reservation without a settlement.
+- Signed terminal webhook replays, each delivered twice, left the ledger and generation records unchanged. Invalid signatures were rejected. Duplicate and out-of-order handling also have automated regression coverage.
+- Operator authorization, daily/per-user totals and exact profit passed. The new day's local provider cost matched `GET /v1/usage` exactly. Temporary operator access was revoked after testing; normal accounts cannot view reports.
+- Queues drained, no failed jobs or pending webhook events remained, and scheduled reconciliation ran using the approved code. These are bounded acceptance results, not a sustained-load test.
+
+**Reconciliation limitation:** historical records with unknown provider-key scope and an unresolved legacy request remain explicitly **unverified**. Equality of completed monetary totals does not prove full historical inventory completeness. No scope or financial record was silently corrected. Other limitations remain: image URLs expire after 24 hours, production password-reset email is unavailable, and the dependency advisory below is unresolved.
+
+## Credits and operator reports
 
 ### Credits
 
@@ -176,11 +191,11 @@ Adoption changes only the scope marker, never old provider parameters, costs, or
 
 Once ledger entries exist, rollback deliberately refuses to discard them. Prefer a forward repair. Rolling web code back to the pre-credit release would allow unreserved generation submissions, so it is not a safe normal rollback. An approved release must replace both web and worker code together, preserve existing provider metadata/idempotency keys, run migrations, then verify fake purchases, ownership and worker readiness on the hosted release before any separately approved hosted generation. Stop old workers and prevent new submissions during the transition: old workers do not write the credit ledger. Keep the scheduler and web/worker code on the same release before reopening submissions.
 
-No additional Cloud resource, dependency, worker, scheduler or real payment service is required. The existing 512 MiB app, PostgreSQL and Valkey architecture remains the target. Reports use indexed exact aggregates; reconciliation bounds provider pages. Actual hosted memory/concurrency capacity and backup restoration remain unverified.
+No additional Cloud resource, dependency, worker, scheduler or real payment service is required. The existing 512 MiB app, PostgreSQL and Valkey architecture remains the target. Reports use indexed exact aggregates; reconciliation bounds provider pages. Bounded hosted acceptance passed on these resources; sustained-load capacity and backup restoration remain unverified.
 
-## Independent final audit remediation (local, pending independent verification)
+## Independently verified retry remediation
 
-The second independent verification confirmed F-03 (scalar storage) and F-04 (legacy completeness), and the original F-02 cross-path cases. It also found F-09 (failed Redis deadline persistence) and F-10 (local limiter consuming provider attempts). The focused local correction below awaits final independent targeted verification; it does not close those findings independently or authorize release. Historical results remain in AUDIT.md and INDEPENDENT_REVIEW.md.
+The second independent verification confirmed F-03 (scalar storage) and F-04 (legacy completeness), and the original F-02 cross-path cases. It also found F-09 (failed Redis deadline persistence) and F-10 (local limiter consuming provider attempts). Final independent targeted verification subsequently confirmed F-09 and F-10 fixed, with prior F-02/F-03/F-04 regressions passing. The approved corrections are deployed. Historical findings and implementation-session results remain in AUDIT.md and INDEPENDENT_REVIEW.md.
 
 ### Durable provider cooldown and no-send deferrals
 
@@ -200,7 +215,7 @@ Generation concurrency limits and overload rejections retain per-generation back
 
 A process crash after committing its token, or a failed database response commit, can require operator recovery. Tokens deliberately have **no automatic expiry**: an elapsed HTTP timeout cannot prove what Retry-After a response required. First stop/identify all producers and confirm the original sender cannot still run. Inspect the pending token and safe status/header/timing evidence. With explicit authorization and known provider requirements, use the existing `ProviderCooldown::finish(token, delay, scope)` under a row lock, preserving later deadlines. A full known delay measured from recovery time is conservative. If the response is unknown, obtain provider confirmation before clearing the barrier; never invent a timeout or delete the row. Ambiguous commit outcomes remain safe through the atomic deadline/token transaction, subject to database durability. There is no automatic reconstruction after database loss or a provider response that was never observed.
 
-The complete local suite passes **255 tests / 1,590 assertions**, including 18 PostgreSQL/Redis integration cases and ten browser cases. Original independent counterexamples now pass unchanged (3 / 14); the separate independent financial/crash safety suite passes (4 / 37). These are implementation-session reruns, not a new independent sign-off. Code checks/build and Composer audit pass; npm's documented advisory remains. No fix has been committed, pushed or deployed.
+The complete local suite passes **255 tests / 1,590 assertions**, including 18 PostgreSQL/Redis integration cases and ten browser cases. Original independent counterexamples now pass unchanged (3 / 14); the separate independent financial/crash safety suite passes (4 / 37). Those counts were also confirmed by the final independent verification and GitHub CI for the deployed commit. Code checks/build and Composer audit passed; npm's documented advisory remains.
 
 ### Reconciliation completeness
 
@@ -208,7 +223,7 @@ Unknown-scope queued/processing legacy requests created before the selected end 
 
 ### Required first credit release: stop, deploy into maintenance, verify, reopen
 
-This is a planned procedure, **not an executed deployment**. Ordinary graceful rolling replacement is unsafe: old workers can settle the generation bill but leave new reservations held forever. Replaying a terminal webhook through new code does not repair that mismatch.
+This procedure was executed for the first credit-aware release on 2026-11-18. It remains a reference for any future incompatible cutover, not an instruction to redeploy. Ordinary graceful rolling replacement of the old pre-credit version is unsafe: old workers can settle the generation bill but leave new reservations held forever. Replaying a terminal webhook through new code does not repair that mismatch.
 
 Laravel Cloud supports [stopping an entire environment](https://laravel.com/cloud/docs/environments#stop-and-restart), including its web, background and scheduler processes, while preserving attached data services. Starting it performs a deployment. After approval for the exact release and outage:
 
@@ -218,7 +233,7 @@ Laravel Cloud supports [stopping an entire environment](https://laravel.com/clou
 4. Start/deploy the exact approved code into maintenance. Freeze `main` at that SHA and omit/set `redeploy=false` when using Cloud Start; `redeploy=true` selects the previous deployed commit, not the new candidate. Verify the resulting deployment SHA, current source fingerprints, sole worker PID/start time/command, scheduler configuration, migrations and ledger consistency. Confirm `/up` returns 200 while normal submission POSTs return 503. The configured worker must omit `--force`; scheduled tasks must not use `evenInMaintenanceMode()`.
 5. Only after those gates, explicitly run `php artisan up` and verify worker/scheduler recovery and non-chargeable acceptance. Verify uncertain provider submissions with their original keys; never create replacements. Provider webhooks may exhaust their delivery retries during downtime, so preserve the inbox and reconcile missing events through polling. New provider generation tests still need separate approval.
 
-If a gate fails, keep maintenance enabled or stop the environment again. Do not reopen old code after credit activity, reset financial tables, clear queues or restore a database casually across provider side effects. After successful activation, restore the ordinary migration-only deploy command as an explicitly reviewed configuration change for later compatible releases. The full-stop capability and local maintenance behavior are verified; hosted stop/start, permissions, health-check configuration and backup restoration are still release gates.
+If a gate fails, keep maintenance enabled or stop the environment again. Do not reopen old code after credit activity, reset financial tables, clear queues or restore a database casually across provider side effects. After successful activation, restore the ordinary migration-only deploy command as an explicitly reviewed configuration change for later compatible releases. Hosted cutover and maintenance checks passed for the approved release. The shutdown decision used the stopped control-plane status and sustained zero activity with explicit acceptance of unexplained replica telemetry; it was not independent proof of every old process terminating. Backup restoration remains untested.
 
 A specifically approved stranded terminal reservation can be repaired under a generation-row transaction/lock by validating the stored usage/rates and ledger, then calling the existing `Credits::settle()` directly. It appends the missing settlement/release without rewriting the generation bill; repeating after the release exists is a no-op. Unexpected partial entries require investigation, not deletion. The audit's $5/$3 example was reproduced locally and repaired to **$4.98596875 available / $0 reserved**, with exactly one $0.01403125 settlement. No production repair was performed.
 
